@@ -1,13 +1,13 @@
 CREATE TABLE IF NOT EXISTS wirevecs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     hash INTEGER NOT NULL
-);  -- not sure whether we need length, we can get it from max(index) + 1 in wirevec_members
+);  -- not sure whether we need length, we can get it from max(idx) + 1 in wirevec_members
 
 CREATE TABLE IF NOT EXISTS wirevec_members (
     wirevec INTEGER,
-    index INTEGER,
+    idx INTEGER,
     wire INTEGER NOT NULL,
-    PRIMARY KEY (wirevec, index),
+    PRIMARY KEY (wirevec, idx),
     FOREIGN KEY (wirevec) REFERENCES wirevecs(id)
 );
 

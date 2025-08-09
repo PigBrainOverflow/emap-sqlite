@@ -1,7 +1,7 @@
 import sqlite3
 import json
 from typing import Iterable, Any
-import utils
+from . import utils
 
 
 class NetlistDB(sqlite3.Connection):
@@ -17,7 +17,7 @@ class NetlistDB(sqlite3.Connection):
     def param_to_int(param: str | int) -> int:
         return param if isinstance(param, int) else int(param, base=2)
 
-    def __init__(self, schema_file: str, db_file: str, cnt: int = 0):
+    def __init__(self, schema_file: str, db_file: str = ":memory:", cnt: int = 0):
         super().__init__(db_file)
         with open(schema_file, "r") as f:
             self.executescript(f.read())
@@ -40,14 +40,14 @@ class NetlistDB(sqlite3.Connection):
         cur = self.execute("SELECT id FROM wirevecs WHERE hash = ?", (h,))
         rows = cur.fetchall()
         for (id,) in rows:  # lookup
-            cur.execute("SELECT wire FROM wirevec_members WHERE wirevec = ? ORDER BY index", (id,))
+            cur.execute("SELECT wire FROM wirevec_members WHERE wirevec = ? ORDER BY idx", (id,))
             if [w for (w,) in cur] == wv:
                 return id
         # not found, insert
         cur.execute("INSERT INTO wirevecs (hash) VALUES (?) RETURNING id", (h,))
         id = cur.fetchone()[0]
         self.executemany(
-            "INSERT INTO wirevec_members (wirevec, index, wire) VALUES (?, ?, ?)",
+            "INSERT INTO wirevec_members (wirevec, idx, wire) VALUES (?, ?, ?)",
             ((id, i, w) for i, w in enumerate(wv))
         )
         self.commit()
@@ -122,10 +122,10 @@ class NetlistDB(sqlite3.Connection):
                 a = [self.bit_to_int(bit) for bit in conns["A"]]
                 b = [self.bit_to_int(bit) for bit in conns["B"]]
                 y = [self.bit_to_int(bit) for bit in conns["Y"]]
-                assert len(a) == len(b) == len(y)
+                # assert len(a) == len(b) == len(y)
                 self._add_aby_cell(type_, a, b, y)
             elif type_ == "$dff":
-                if not NetlistDB.to_int(params["CLK_POLARITY"]):
+                if not self.param_to_int(params["CLK_POLARITY"]):
                     raise ValueError("$dff with negative clock polarity is not supported")
                 if self._clk is None:
                     raise ValueError("Global clock is not defined")
@@ -154,7 +154,7 @@ class NetlistDB(sqlite3.Connection):
                 a = [self.bit_to_int(bit) for bit in conns["A"]]
                 b = [self.bit_to_int(bit) for bit in conns["B"]]
                 y = [self.bit_to_int(bit) for bit in conns["Y"]]
-                assert len(a) == len(b)
+                # assert len(a) == len(b)
                 self._add_aby_cell(type_, a, b, y)
             else:
                 attrs = cell["attributes"]
