@@ -14,13 +14,13 @@ CREATE TABLE IF NOT EXISTS wirevec_members (
 CREATE TABLE IF NOT EXISTS as_outputs (
     sink INTEGER NOT NULL,
     name VARCHAR(16) PRIMARY KEY,
-    FOREIGN KEY (wirevec) REFERENCES wirevecs(id)
+    FOREIGN KEY (sink) REFERENCES wirevecs(id)
 );
 
 CREATE TABLE IF NOT EXISTS from_inputs (
     source INTEGER NOT NULL,
     name VARCHAR(16) PRIMARY KEY,
-    FOREIGN KEY (wirevec) REFERENCES wirevecs(id)
+    FOREIGN KEY (source) REFERENCES wirevecs(id)
 );
 
 CREATE TABLE IF NOT EXISTS ay_cells (
@@ -73,9 +73,9 @@ CREATE TABLE IF NOT EXISTS instances (
 CREATE TABLE IF NOT EXISTS instance_ports (
     instance VARCHAR(16),
     port VARCHAR(16),
-    wirevec INTEGER NOT NULL,
+    signal INTEGER NOT NULL,    -- in RTLIL, a signal is everything that can be applied to a cell port
     direction VARCHAR(16),  -- 'input', 'output', null
     PRIMARY KEY (instance, port),
     FOREIGN KEY (instance) REFERENCES instances(name),
-    FOREIGN KEY (wirevec) REFERENCES wirevecs(id)
+    FOREIGN KEY (signal) REFERENCES wirevecs(id)
 );
