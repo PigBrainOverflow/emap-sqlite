@@ -17,6 +17,11 @@ class NetlistDB(sqlite3.Connection):
     def param_to_int(param: str | int) -> int:
         return param if isinstance(param, int) else int(param, base=2)
 
+    @property
+    def auto_id(self) -> int:
+        self._cnt += 1
+        return self._cnt
+
     def __init__(self, schema_file: str, db_file: str = ":memory:", cnt: int = 0):
         super().__init__(db_file)
         with open(schema_file, "r") as f:
@@ -35,7 +40,7 @@ class NetlistDB(sqlite3.Connection):
             db[table] = [dict(zip([col[0] for col in cur.description], row)) for row in rows]
         return db
 
-    def _add_wirevec(self, wv: list[int]) -> int:
+    def _create_or_lookup_wirevec(self, wv: list[int]) -> int:
         h = self._rhash.hash(wv)
         cur = self.execute("SELECT id FROM wirevecs WHERE hash = ?", (h,))
         rows = cur.fetchall()
@@ -54,39 +59,39 @@ class NetlistDB(sqlite3.Connection):
         return id
 
     def _add_input(self, name: str, source: list[int]):
-        ws = self._add_wirevec(source)
+        ws = self._create_or_lookup_wirevec(source)
         self.execute("INSERT INTO from_inputs (source, name) VALUES (?, ?)", (ws, name))
         self.commit()
 
     def _add_output(self, name: str, sink: list[int]):
-        ws = self._add_wirevec(sink)
+        ws = self._create_or_lookup_wirevec(sink)
         self.execute("INSERT INTO as_outputs (sink, name) VALUES (?, ?)", (ws, name))
         self.commit()
 
     def _add_dff(self, d: list[int], q: list[int]):
-        wvd = self._add_wirevec(d)
-        wvq = self._add_wirevec(q)
+        wvd = self._create_or_lookup_wirevec(d)
+        wvq = self._create_or_lookup_wirevec(q)
         self.execute("INSERT OR IGNORE INTO dffs (d, q) VALUES (?, ?)", (wvd, wvq))
         self.commit()
 
     def _add_ay_cell(self, type_: str, a: list[int], y: list[int]):
-        wva, wvy = self._add_wirevec(a), self._add_wirevec(y)
+        wva, wvy = self._create_or_lookup_wirevec(a), self._create_or_lookup_wirevec(y)
         self.execute("INSERT OR IGNORE INTO ay_cells (type, a, y) VALUES (?, ?, ?)", (type_, wva, wvy))
         self.commit()
 
     def _add_aby_cell(self, type_: str, a: list[int], b: list[int], y: list[int]):
-        wva, wvb, wvy = self._add_wirevec(a), self._add_wirevec(b), self._add_wirevec(y)
+        wva, wvb, wvy = self._create_or_lookup_wirevec(a), self._create_or_lookup_wirevec(b), self._create_or_lookup_wirevec(y)
         self.execute("INSERT OR IGNORE INTO aby_cells (type, a, b, y) VALUES (?, ?, ?, ?)", (type_, wva, wvb, wvy))
         self.commit()
 
     def _add_absy_cell(self, type_: str, a: list[int], b: list[int], s: list[int], y: list[int]):
-        wva, wvb, wvs, wvy = self._add_wirevec(a), self._add_wirevec(b), self._add_wirevec(s), self._add_wirevec(y)
+        wva, wvb, wvs, wvy = self._create_or_lookup_wirevec(a), self._create_or_lookup_wirevec(b), self._create_or_lookup_wirevec(s), self._create_or_lookup_wirevec(y)
         self.execute("INSERT OR IGNORE INTO absy_cells (type, a, b, s, y) VALUES (?, ?, ?, ?, ?)", (type_, wva, wvb, wvs, wvy))
         self.commit()
 
     def _add_blackbox_cell(self, name: str, module: str, params: dict[str, Any], signals: list[tuple[str, list[int]]]):
         self.execute("INSERT INTO instances (name, params, module) VALUES (?, ?, ?)", (name, json.dumps(params), module))
-        self.executemany("INSERT INTO instance_ports (instance, port, signal) VALUES (?, ?, ?)", ((name, port, self._add_wirevec(signal)) for port, signal in signals))
+        self.executemany("INSERT INTO instance_ports (instance, port, signal) VALUES (?, ?, ?)", ((name, port, self._create_or_lookup_wirevec(signal)) for port, signal in signals))
         self.commit()
 
     def build_from_json(self, mod: dict[str, Any], clk: str = "clk"):
@@ -164,3 +169,5 @@ class NetlistDB(sqlite3.Connection):
                     raise ValueError(f"Unsupported cell type: {type_}")
 
         self.commit()
+        # set cnt
+        self._cnt = self.execute("SELECT MAX(wire) FROM wirevec_members").fetchone()[0] or 1
