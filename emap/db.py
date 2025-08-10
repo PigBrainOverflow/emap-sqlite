@@ -171,3 +171,44 @@ class NetlistDB(sqlite3.Connection):
         self.commit()
         # set cnt
         self._cnt = self.execute("SELECT MAX(wire) FROM wirevec_members").fetchone()[0] or 1
+
+    def _merge_cells(self) -> list[list[int]]:
+        # TODO: for now, we only check aby_cells
+        cur = self.execute("SELECT type, a, b, y FROM aby_cells")
+        wires: dict[tuple[str, int, int], list[int]] = {}
+        for type_, a, b, y in cur:
+            if (type_, a, b) not in wires:
+                wires[(type_, a, b)] = []
+            wires[(type_, a, b)].append(y)
+        for (type_, a, b), ys in wires.items():
+            if len(ys) > 1:
+                cur.execute("DELETE FROM aby_cells WHERE type = ? AND a = ? AND b = ?", (type_, a, b))
+                cur.execute("INSERT INTO aby_cells (type, a, b, y), VALUES (?, ?, ?, ?)", (type_, a, b, ys[0])) # keep the first y
+        self.commit()
+        return [ws for ws in wires.values() if len(ws) > 1]
+
+    def _merge_wires(self, wires_to_merge: Iterable[list[int]]):
+        for ws in wires_to_merge:
+            for i in range(1, len(ws)):
+                cur = self.execute("SELECT wirevec, idx FROM wirevec_members WHERE wire = ?", (ws[i],))
+                for wirevec, hash_, idx in cur.fetchall(): # update wirevec's hash
+                    cur.execute("UPDATE wirevecs SET hash = ? WHERE id = ?", (self._rhash.update(hash_, idx, ws[i], ws[0]), wirevec))
+                cur.execute("UPDATE wirevec_members SET wire = ? WHERE wire = ?", (ws[0], ws[i]))   # update wirevec_members
+        self.commit()
+
+    def _merge_wirevecs(self):
+        cur = self.execute("SELECT id, hash FROM wirevecs")
+        wirevecs: dict[int, list[int]] = {}
+        # TODO: merge wirevecs by hash
+
+    def rebuild(self, max_iter: int = 1000):
+        # union
+        # merge_cells -> merge_wires -> merge_wirevecs -> merge_cells -> ...
+        # all phases are batched processing
+        # TODO: parallelize them
+        for _ in range(max_iter):
+            wires_to_merge = self._merge_cells()
+            if not wires_to_merge:
+                return
+            self._merge_wires(wires_to_merge)
+            self._merge_wirevecs()
