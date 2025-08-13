@@ -1,14 +1,15 @@
 CREATE TABLE IF NOT EXISTS wirevecs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     hash INTEGER NOT NULL
-);  -- not sure whether we need length, we can get it from max(idx) + 1 in wirevec_members
+);
+-- not sure whether we need length field, we can get it from max(idx) + 1 in wirevec_members
 
 CREATE TABLE IF NOT EXISTS wirevec_members (
     wirevec INTEGER,
     idx INTEGER,
     wire INTEGER NOT NULL,
     PRIMARY KEY (wirevec, idx),
-    FOREIGN KEY (wirevec) REFERENCES wirevecs(id)
+    FOREIGN KEY (wirevec) REFERENCES wirevecs(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS as_outputs (
@@ -30,7 +31,7 @@ CREATE TABLE IF NOT EXISTS ay_cells (
     PRIMARY KEY (type, a, y),
     FOREIGN KEY (a) REFERENCES wirevecs(id),
     FOREIGN KEY (y) REFERENCES wirevecs(id)
-);  -- not sure whether we need a bitwise version of it
+);
 
 CREATE TABLE IF NOT EXISTS aby_cells (
     type VARCHAR(16),
@@ -42,6 +43,9 @@ CREATE TABLE IF NOT EXISTS aby_cells (
     FOREIGN KEY (b) REFERENCES wirevecs(id),
     FOREIGN KEY (y) REFERENCES wirevecs(id)
 );
+-- not sure whether we need a bitwise version of it
+-- NOTE: be careful with the same inputs but different outputs' widths, they should be treated as different cells
+-- TODO: add output width field
 
 CREATE TABLE IF NOT EXISTS absy_cells (
     type VARCHAR(16),
@@ -62,7 +66,8 @@ CREATE TABLE IF NOT EXISTS dffs (
     PRIMARY KEY (d, q),
     FOREIGN KEY (d) REFERENCES wirevecs(id),
     FOREIGN KEY (q) REFERENCES wirevecs(id)
-);  -- we assume there's a global clock wire
+);
+-- we assume there's a global clock wire
 
 CREATE TABLE IF NOT EXISTS instances (
     name VARCHAR(16) PRIMARY KEY,

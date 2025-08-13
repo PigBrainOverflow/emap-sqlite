@@ -35,9 +35,8 @@ def rewrite_assoc_to_right(db: NetlistDB, target_types: list[str]) -> int:
         target_types
     )
 
-    rows = cur.fetchall()
     newrows = []
-    for type_, a, b, c, y in rows:
+    for type_, a, b, c, y in cur.fetchall():
         cur.execute("SELECT MAX(idx) FROM wirevec_members WHERE wirevec = ?", (y,))
         width_b_add_c = cur.fetchone()[0] + 1
         cur.execute(
@@ -45,12 +44,7 @@ def rewrite_assoc_to_right(db: NetlistDB, target_types: list[str]) -> int:
             (type_, b, c, width_b_add_c)
         )
         row = cur.fetchone()
-        if row is None:
-            # b + c does not exist, create it
-            newrows.append((type_, a, db._create_or_lookup_wirevec([db.auto_id for _ in range(width_b_add_c)], y)))
-        else:
-            # b + c exists, use it
-            newrows.append((type_, a, row[0], y))
+        newrows.append((type_, a, db._add_wirevec([db.auto_id for _ in range(width_b_add_c)]) if row is None else row[0], y))
     cur.executemany("INSERT OR IGNORE INTO aby_cells (type, a, b, y) VALUES (?, ?, ?, ?)", newrows)
     db.commit()
     return cur.rowcount

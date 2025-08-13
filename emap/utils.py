@@ -27,33 +27,30 @@ class RollingHash:
 
 
 class DisjointSetUnion:
-    _parents: dict[int, int]
-    _ranks: dict[int, int]
-
     def __init__(self):
-        self._parents = {}
+        self._parents: dict[int, int] = {}
 
-    def find(self, x):
+    @property
+    def parents(self) -> dict[int, int]:
+        return self._parents
+
+    def find(self, x: int) -> int:
         if x not in self._parents:
             self._parents[x] = x  # initialize parent to itself
-            self._ranks[x] = 0    # initialize rank to 0
             return x
         if self._parents[x] != x:
             self._parents[x] = self.find(self._parents[x])  # path compression
         return self._parents[x]
 
-    def union(self, x, y) -> bool:
+    def union(self, x: int, y: int) -> bool:
         xr, yr = self.find(x), self.find(y)
         if xr == yr:
             return False  # already in same set
 
-        # union by rank
-        if self.rank[xr] < self.rank[yr]:
-            self.parent[xr] = yr
-        elif self.rank[xr] > self.rank[yr]:
-            self.parent[yr] = xr
+        # union
+        if xr < yr:
+            self._parents[yr] = xr  # choose the smaller as parent
         else:
-            self.parent[yr] = xr
-            self.rank[xr] += 1
+            self._parents[xr] = yr
 
         return True

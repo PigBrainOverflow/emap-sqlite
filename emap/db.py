@@ -40,13 +40,27 @@ class NetlistDB(sqlite3.Connection):
             db[table] = [dict(zip([col[0] for col in cur.description], row)) for row in rows]
         return db
 
+    def _get_wirevec(self, id: int) -> list[int]:
+        cur = self.execute("SELECT wire FROM wirevec_members WHERE wirevec = ? ORDER BY idx", (id,))
+        return [w for (w,) in cur]
+
+    def _add_wirevec(self, wv: list[int]) -> int:
+        h = self._rhash.hash(wv)
+        cur = self.execute("INSERT INTO wirevecs (hash) VALUES (?) RETURNING id", (h,))
+        id = cur.fetchone()[0]
+        self.executemany(
+            "INSERT INTO wirevec_members (wirevec, idx, wire) VALUES (?, ?, ?)",
+            ((id, i, w) for i, w in enumerate(wv))
+        )
+        self.commit()
+        return id
+
     def _create_or_lookup_wirevec(self, wv: list[int]) -> int:
         h = self._rhash.hash(wv)
         cur = self.execute("SELECT id FROM wirevecs WHERE hash = ?", (h,))
         rows = cur.fetchall()
         for (id,) in rows:  # lookup
-            cur.execute("SELECT wire FROM wirevec_members WHERE wirevec = ? ORDER BY idx", (id,))
-            if [w for (w,) in cur] == wv:
+            if self._get_wirevec(id) == wv:
                 return id
         # not found, insert
         cur.execute("INSERT INTO wirevecs (hash) VALUES (?) RETURNING id", (h,))
@@ -114,7 +128,10 @@ class NetlistDB(sqlite3.Connection):
                 raise ValueError(f"Unsupported port direction: {direction}")
 
         # build cells
-        for name, cell in cells.items():
+        print(f"Found {len(cells)} cells")
+        for i, (name, cell) in enumerate(cells.items()):
+            if i % 1000 == 0:
+                print(f"Processing cell {i}/{len(cells)}: {name}")
             type_: str = cell["type"]
             params: dict[str, Any] = cell["parameters"]
             conns: dict[str, Any] = cell["connections"]
@@ -172,43 +189,104 @@ class NetlistDB(sqlite3.Connection):
         # set cnt
         self._cnt = self.execute("SELECT MAX(wire) FROM wirevec_members").fetchone()[0] or 1
 
-    def _merge_cells(self) -> list[list[int]]:
+    def _merge_cells(self) -> utils.DisjointSetUnion:
+        """
+        Return the wires that need to be merged.
+        """
         # TODO: for now, we only check aby_cells
+        dsu = utils.DisjointSetUnion()
         cur = self.execute("SELECT type, a, b, y FROM aby_cells")
         wires: dict[tuple[str, int, int], list[int]] = {}
         for type_, a, b, y in cur:
             if (type_, a, b) not in wires:
                 wires[(type_, a, b)] = []
             wires[(type_, a, b)].append(y)
+
         for (type_, a, b), ys in wires.items():
             if len(ys) > 1:
-                cur.execute("DELETE FROM aby_cells WHERE type = ? AND a = ? AND b = ?", (type_, a, b))
-                cur.execute("INSERT INTO aby_cells (type, a, b, y), VALUES (?, ?, ?, ?)", (type_, a, b, ys[0])) # keep the first y
+                wv0 = self._get_wirevec(ys[0])
+                for y in ys[1:]:
+                    wv = self._get_wirevec(y)
+                    for w0, w in zip(wv0, wv):
+                        dsu.union(w0, w)
         self.commit()
-        return [ws for ws in wires.values() if len(ws) > 1]
+        return dsu
 
-    def _merge_wires(self, wires_to_merge: Iterable[list[int]]):
-        for ws in wires_to_merge:
-            for i in range(1, len(ws)):
-                cur = self.execute("SELECT wirevec, idx FROM wirevec_members WHERE wire = ?", (ws[i],))
-                for wirevec, hash_, idx in cur.fetchall(): # update wirevec's hash
-                    cur.execute("UPDATE wirevecs SET hash = ? WHERE id = ?", (self._rhash.update(hash_, idx, ws[i], ws[0]), wirevec))
-                cur.execute("UPDATE wirevec_members SET wire = ? WHERE wire = ?", (ws[0], ws[i]))   # update wirevec_members
+    def _merge_wires(self, wires_to_merge: utils.DisjointSetUnion):
+        for w in wires_to_merge.parents:
+            cur = self.execute("SELECT wirevec, idx FROM wirevec_members WHERE wire = ?", (w,))
+            for wv, idx in cur.fetchall():
+                cur.execute("SELECT hash FROM wirevecs WHERE id = ?", (wv,))
+                old_h = cur.fetchone()[0]
+                new_w = wires_to_merge.find(w)
+                # update wirevec member
+                cur.execute("UPDATE wirevec_members SET wire = ? WHERE wirevec = ? AND idx = ?", (new_w, wv, idx))
+                # update hash
+                cur.execute("UPDATE wirevecs SET hash = ? WHERE id = ?", (self._rhash.update(old_h, idx, w, new_w), wv))
         self.commit()
 
     def _merge_wirevecs(self):
+        dsu = utils.DisjointSetUnion()
         cur = self.execute("SELECT id, hash FROM wirevecs")
         wirevecs: dict[int, list[int]] = {}
-        # TODO: merge wirevecs by hash
+        for id, h in cur:
+            if h not in wirevecs:
+                wirevecs[h] = []
+            wirevecs[h].append(id)
 
-    def rebuild(self, max_iter: int = 1000):
+        for h, ids in wirevecs.items():
+            if len(ids) > 1:
+                wvs: dict[tuple[int, ...], list[int]] = {}
+                for id in ids:
+                    wv = self._get_wirevec(id)
+                    if tuple(wv) not in wvs:
+                        wvs[tuple(wv)] = []
+                    wvs[tuple(wv)].append(id)
+                for wvids in wvs.values():
+                    if len(wvids) > 1:
+                        for wvid in range(1, len(wvids)):
+                            dsu.union(id[0], id[wvid])
+
+        cur.executemany("DELETE FROM wirevecs WHERE id = ?", ((wv,) for wv in dsu.parents if dsu.find(wv) == wv))
+        self.commit()
+        return dsu
+
+    def _update_cells(self, dsu: utils.DisjointSetUnion):
+        # TODO: for now, we only update aby_cells
+        for wv in dsu.parents:
+            leader = dsu.find(wv)
+            if leader != wv:
+                cur = self.execute("SELECT type, b, y FROM aby_cells WHERE a = ?", (wv,))
+                rows = cur.fetchall()
+                cur.execute("DELETE FROM aby_cells WHERE a = ?")
+                cur.executemany(
+                    "INSERT OR IGNORE INTO aby_cells (type, a, b, y) VALUES (?, ?, ?, ?)",
+                    ((type_, leader, b, y) for type_, b, y in rows)
+                )
+                cur = self.execute("SELECT type, a, y FROM aby_cells WHERE b = ?", (wv,))
+                rows = cur.fetchall()
+                cur.execute("DELETE FROM aby_cells WHERE b = ?")
+                cur.executemany(
+                    "INSERT OR IGNORE INTO aby_cells (type, a, b, y) VALUES (?, ?, ?, ?)",
+                    ((type_, a, leader, y) for type_, a, y in rows)
+                )
+        self.commit()
+
+    def rebuild_once(self) -> bool:
         # union
-        # merge_cells -> merge_wires -> merge_wirevecs -> merge_cells -> ...
+        # merge_cells -> merge_wires -> merge_wirevecs
         # all phases are batched processing
         # TODO: parallelize them
-        for _ in range(max_iter):
-            wires_to_merge = self._merge_cells()
-            if not wires_to_merge:
-                return
-            self._merge_wires(wires_to_merge)
-            self._merge_wirevecs()
+        wires_to_merge = self._merge_cells()
+        if not wires_to_merge.parents:
+            return False
+        self._merge_wires(wires_to_merge)
+        wirevecs_to_merge = self._merge_wirevecs()
+        self._update_cells(wirevecs_to_merge)
+        return True
+
+    def rebuild(self) -> int:
+        cnt = 0
+        while self.rebuild_once():
+            cnt += 1
+        return cnt
