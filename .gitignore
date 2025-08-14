@@ -1,2 +1,6 @@
+.vscode
 /*.json
+/*.db
+build
 __pycache__
+.cache

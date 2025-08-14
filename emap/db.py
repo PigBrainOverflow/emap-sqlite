@@ -5,6 +5,7 @@ from . import utils
 
 
 class NetlistDB(sqlite3.Connection):
+    _db_file: str
     _clk: int | None
     _cnt: int
     _rhash: utils.RollingHash
@@ -26,6 +27,7 @@ class NetlistDB(sqlite3.Connection):
         super().__init__(db_file)
         with open(schema_file, "r") as f:
             self.executescript(f.read())
+        self._db_file = db_file
         self._clk = None
         self._cnt = cnt
         self._rhash = utils.RollingHash()
@@ -107,6 +109,17 @@ class NetlistDB(sqlite3.Connection):
         self.execute("INSERT INTO instances (name, params, module) VALUES (?, ?, ?)", (name, json.dumps(params), module))
         self.executemany("INSERT INTO instance_ports (instance, port, signal) VALUES (?, ?, ?)", ((name, port, self._create_or_lookup_wirevec(signal)) for port, signal in signals))
         self.commit()
+
+    def build_from_json_cpp(self, mod: dict[str, Any], clk: str = "clk"):
+        if self._db_file == ":memory:":
+            raise RuntimeError("Cannot call build_from_json_cpp() on in-memory database")
+        try:
+            from .emapcc.build import emapcc
+            self._clk, self._cnt = emapcc.build_from_json(self._db_file, mod, clk, self._rhash._POWER_B[1], self._rhash._M)
+        except ImportError:
+            raise RuntimeError("emapcc module is not available. Please build emapcc to use build_from_json_cpp()")
+        except Exception as e:
+            raise RuntimeError(f"Failed to build from JSON: {e}")
 
     def build_from_json(self, mod: dict[str, Any], clk: str = "clk"):
         # NOTE: only support single global clock
