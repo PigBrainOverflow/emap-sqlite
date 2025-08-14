@@ -1,25 +1,30 @@
+from typing import Iterable
 from ..db import NetlistDB
-from .utils import rewrite_tags
 
 
-@rewrite_tags(post_rebuild=False, batched=True)
-def rewrite_comm(db: NetlistDB, target_types: list[str]) -> int:
+def ematch_comm(db: NetlistDB, target_types: list[str]) -> Iterable[tuple[str, int, int, int]]:
     """
-    Rewrite commutative cells by swapping inputs.
-    Return the number of rows rewritten.
+    Return a list of tuples (type, a, b, y) for commutative cells.
     """
     cur = db.execute(
         "SELECT type, a, b, y FROM aby_cells WHERE type IN ({})".format(",".join("?" * len(target_types))),
         target_types
     )
-    cur.executemany(
+    return cur
+
+def apply_comm(db: NetlistDB, matches: Iterable[tuple[str, int, int, int]]) -> int:
+    """
+    Return the number of rows rewritten by applying commutative matches.
+    """
+    cur = db.executemany(
         "INSERT OR IGNORE INTO aby_cells (type, a, b, y) VALUES (?, ?, ?, ?)",
-        [(type_, b, a, y) for type_, a, b, y in cur]
+        ((type_, b, a, y) for type_, a, b, y in matches)
     )
     db.commit()
     return cur.rowcount
 
-@rewrite_tags(post_rebuild=True, batched=True)
+
+# TODO: separate it
 def rewrite_assoc_to_right(db: NetlistDB, target_types: list[str]) -> int:
     """
     Rewrite associative cells to right associative form.
