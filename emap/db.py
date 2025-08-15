@@ -9,6 +9,7 @@ class NetlistDB(sqlite3.Connection):
     _clk: int | None
     _cnt: int
     _rhash: utils.RollingHash
+    _emapcc_handle: Any | None
 
     @staticmethod
     def bit_to_int(bit: str | int) -> int:
@@ -31,6 +32,7 @@ class NetlistDB(sqlite3.Connection):
         self._clk = None
         self._cnt = cnt
         self._rhash = utils.RollingHash()
+        self._emapcc_handle = None
 
     def dump_tables(self) -> dict:
         # get all tables except sqlite internal tables

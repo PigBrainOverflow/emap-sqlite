@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS wirevecs (
     hash INTEGER NOT NULL
 );
 -- not sure whether we need length field, we can get it from max(idx) + 1 in wirevec_members
+CREATE INDEX IF NOT EXISTS wirevecs_hash ON wirevecs(hash); -- for quick lookup by hash
 
 CREATE TABLE IF NOT EXISTS wirevec_members (
     wirevec INTEGER,
@@ -11,6 +12,7 @@ CREATE TABLE IF NOT EXISTS wirevec_members (
     PRIMARY KEY (wirevec, idx),
     FOREIGN KEY (wirevec) REFERENCES wirevecs(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS wirevec_members_wire on wirevec_members(wire);   -- for quick lookup by wire
 
 CREATE TABLE IF NOT EXISTS as_outputs (
     sink INTEGER NOT NULL,
