@@ -5,6 +5,8 @@
 #include <sqlite3.h>
 
 
+namespace emapcc {
+
 class EmapccHandle {
 private:
     sqlite3* db;
@@ -20,12 +22,9 @@ public:
     ~EmapccHandle() {
         sqlite3_close(db);
     }
-
-    void build_from_json
 };
 
-
-
+}
 
 
 #endif

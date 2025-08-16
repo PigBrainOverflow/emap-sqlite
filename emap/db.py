@@ -1,6 +1,6 @@
 import sqlite3
 import json
-from typing import Iterable, Any
+from typing import Any
 from . import utils
 
 
@@ -28,6 +28,7 @@ class NetlistDB(sqlite3.Connection):
         super().__init__(db_file)
         with open(schema_file, "r") as f:
             self.executescript(f.read())
+        # self.execute("PRAGMA foreign_keys = ON")    # enable foreign key enforcement
         self._db_file = db_file
         self._clk = None
         self._cnt = cnt
@@ -260,9 +261,10 @@ class NetlistDB(sqlite3.Connection):
                 for wvids in wvs.values():
                     if len(wvids) > 1:
                         for wvid in range(1, len(wvids)):
-                            dsu.union(id[0], id[wvid])
+                            dsu.union(wvids[0], wvids[wvid])
 
         cur.executemany("DELETE FROM wirevecs WHERE id = ?", ((wv,) for wv in dsu.parents if dsu.find(wv) == wv))
+        cur.executemany("DELETE FROM wirevec_members WHERE wirevec = ?", ((wv,) for wv in dsu.parents if dsu.find(wv) == wv))   # TODO: it seems that SQLite does not support ON DELETE CASCADE, delete manually
         self.commit()
         return dsu
 
@@ -273,14 +275,14 @@ class NetlistDB(sqlite3.Connection):
             if leader != wv:
                 cur = self.execute("SELECT type, b, y FROM aby_cells WHERE a = ?", (wv,))
                 rows = cur.fetchall()
-                cur.execute("DELETE FROM aby_cells WHERE a = ?")
+                cur.execute("DELETE FROM aby_cells WHERE a = ?", (wv,))
                 cur.executemany(
                     "INSERT OR IGNORE INTO aby_cells (type, a, b, y) VALUES (?, ?, ?, ?)",
                     ((type_, leader, b, y) for type_, b, y in rows)
                 )
                 cur = self.execute("SELECT type, a, y FROM aby_cells WHERE b = ?", (wv,))
                 rows = cur.fetchall()
-                cur.execute("DELETE FROM aby_cells WHERE b = ?")
+                cur.execute("DELETE FROM aby_cells WHERE b = ?", (wv,))
                 cur.executemany(
                     "INSERT OR IGNORE INTO aby_cells (type, a, b, y) VALUES (?, ?, ?, ?)",
                     ((type_, a, leader, y) for type_, a, y in rows)
@@ -289,7 +291,7 @@ class NetlistDB(sqlite3.Connection):
 
     def rebuild_once(self) -> bool:
         # union
-        # merge_cells -> merge_wires -> merge_wirevecs
+        # merge_cells -> merge_wires -> merge_wirevecs -> update_cells
         # all phases are batched processing
         # TODO: parallelize them
         wires_to_merge = self._merge_cells()
