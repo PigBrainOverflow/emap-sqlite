@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS wirevec_members (
     idx INTEGER,
     wire INTEGER NOT NULL,
     PRIMARY KEY (wirevec, idx),
-    FOREIGN KEY (wirevec) REFERENCES wirevecs(id) ON DELETE CASCADE
+    FOREIGN KEY (wirevec) REFERENCES wirevecs(id) -- ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS wirevec_members_wire on wirevec_members(wire);   -- for quick lookup by wire
 

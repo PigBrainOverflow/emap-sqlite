@@ -220,6 +220,8 @@ class NetlistDB(sqlite3.Connection):
 
         for (type_, a, b), ys in wires.items():
             if len(ys) > 1:
+                # remove duplicates
+                cur.execute("DELETE FROM aby_cells WHERE type = ? AND a = ? AND b = ? AND y != ?", (type_, a, b, ys[0]))
                 wv0 = self._get_wirevec(ys[0])
                 for y in ys[1:]:
                     wv = self._get_wirevec(y)
@@ -263,16 +265,17 @@ class NetlistDB(sqlite3.Connection):
                         for wvid in range(1, len(wvids)):
                             dsu.union(wvids[0], wvids[wvid])
 
-        cur.executemany("DELETE FROM wirevecs WHERE id = ?", ((wv,) for wv in dsu.parents if dsu.find(wv) == wv))
-        cur.executemany("DELETE FROM wirevec_members WHERE wirevec = ?", ((wv,) for wv in dsu.parents if dsu.find(wv) == wv))   # TODO: it seems that SQLite does not support ON DELETE CASCADE, delete manually
+        cur.executemany("DELETE FROM wirevecs WHERE id = ?", ((wv,) for wv in dsu.parents if dsu.find(wv) != wv))
+        cur.executemany("DELETE FROM wirevec_members WHERE wirevec = ?", ((wv,) for wv in dsu.parents if dsu.find(wv) != wv))   # TODO: it seems that SQLite does not support ON DELETE CASCADE, delete manually
         self.commit()
         return dsu
 
     def _update_cells(self, dsu: utils.DisjointSetUnion):
-        # TODO: for now, we only update aby_cells
+        # TODO: for now, we only update aby_cells and dffs
         for wv in dsu.parents:
             leader = dsu.find(wv)
             if leader != wv:
+                # update aby_cells
                 cur = self.execute("SELECT type, b, y FROM aby_cells WHERE a = ?", (wv,))
                 rows = cur.fetchall()
                 cur.execute("DELETE FROM aby_cells WHERE a = ?", (wv,))
@@ -286,6 +289,29 @@ class NetlistDB(sqlite3.Connection):
                 cur.executemany(
                     "INSERT OR IGNORE INTO aby_cells (type, a, b, y) VALUES (?, ?, ?, ?)",
                     ((type_, a, leader, y) for type_, a, y in rows)
+                )
+                cur = self.execute("SELECT type, a, b FROM aby_cells WHERE y = ?", (wv,))
+                rows = cur.fetchall()
+                cur.execute("DELETE FROM aby_cells WHERE y = ?", (wv,))
+                cur.executemany(
+                    "INSERT OR IGNORE INTO aby_cells (type, a, b, y) VALUES (?, ?, ?, ?)",
+                    ((type_, a, b, leader) for type_, a, b in rows)
+                )
+
+                # update dffs
+                cur = self.execute("SELECT d, q FROM dffs WHERE d = ?", (wv,))
+                rows = cur.fetchall()
+                cur.execute("DELETE FROM dffs WHERE d = ?", (wv,))
+                cur.executemany(
+                    "INSERT OR IGNORE INTO dffs (d, q) VALUES (?, ?)",
+                    ((leader, q) for _, q in rows)
+                )
+                cur = self.execute("SELECT d, q FROM dffs WHERE q = ?", (wv,))
+                rows = cur.fetchall()
+                cur.execute("DELETE FROM dffs WHERE q = ?", (wv,))
+                cur.executemany(
+                    "INSERT OR IGNORE INTO dffs (d, q) VALUES (?, ?)",
+                    ((d, leader) for d, _ in rows)
                 )
         self.commit()
 

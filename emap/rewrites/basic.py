@@ -16,6 +16,7 @@ def apply_comm(db: NetlistDB, matches: Iterable[tuple[str, int, int, int]]) -> i
     """
     Return the number of rows rewritten by applying commutative matches.
     """
+    matches = list(matches) # for debug
     cur = db.executemany(
         "INSERT OR IGNORE INTO aby_cells (type, a, b, y) VALUES (?, ?, ?, ?)",
         ((type_, b, a, y) for type_, a, b, y in matches)
